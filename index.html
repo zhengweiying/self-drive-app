@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="蜕变">
+  <title>蜕变 · 个人成长系统</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 顶部导航 -->
+    <header class="topbar">
+      <div class="topbar-title" id="pageTitle">蜕变</div>
+      <button class="lock-btn" id="lockBtn" title="锁定应用">🔒</button>
+    </header>
+
+    <!-- 主内容 -->
+    <main class="content" id="content"></main>
+
+    <!-- 底部导航 -->
+    <nav class="tabbar">
+      <button class="tab active" data-tab="home">🏠<span>首页</span></button>
+      <button class="tab" data-tab="record">📝<span>记录</span></button>
+      <button class="tab" data-tab="plan">🎯<span>规划</span></button>
+      <button class="tab" data-tab="plan45">🔥<span>45天</span></button>
+      <button class="tab" data-tab="remind">⏰<span>提醒</span></button>
+    </nav>
+  </div>
+
+  <!-- 弹窗容器 -->
+  <div id="modal"></div>
+
+  <!-- 登录锁屏 -->
+  <div id="loginScreen" class="login-screen">
+    <div class="login-box">
+      <div class="login-icon">🔥</div>
+      <div class="login-title" id="loginTitle">蜕变 · 个人成长系统</div>
+      <div class="login-sub" id="loginSub">欢迎回来</div>
+      <div class="field">
+        <input class="input" id="loginUser" placeholder="账号" autocomplete="username">
+      </div>
+      <div class="field">
+        <input class="input" type="password" id="loginPass" placeholder="密码" autocomplete="current-password">
+      </div>
+      <div class="field" id="loginConfirmField" style="display:none;">
+        <input class="input" type="password" id="loginPass2" placeholder="确认密码" autocomplete="new-password">
+      </div>
+      <button class="btn btn-primary btn-block" id="loginBtn">登录</button>
+      <div class="login-hint" id="loginHint"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
