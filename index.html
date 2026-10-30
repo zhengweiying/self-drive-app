@@ -9,7 +9,8 @@
   <meta name="apple-mobile-web-app-title" content="蜕变">
   <title>蜕变 · 个人成长系统</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="apple-touch-icon" href="icon.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" href="icon-192.png">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -17,7 +18,10 @@
     <!-- 顶部导航 -->
     <header class="topbar">
       <div class="topbar-title" id="pageTitle">蜕变</div>
-      <button class="lock-btn" id="lockBtn" title="锁定应用">🔒</button>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="lock-btn" id="settingsBtn" title="设置">⚙️</button>
+        <button class="lock-btn" id="lockBtn" title="锁定应用">🔒</button>
+      </div>
     </header>
 
     <!-- 主内容 -->
@@ -39,7 +43,9 @@
   <!-- 登录锁屏 -->
   <div id="loginScreen" class="login-screen">
     <div class="login-box">
-      <div class="login-icon">🔥</div>
+      <div class="login-icon">
+        <img src="icon-192.png" alt="蜕变" style="width:72px;height:72px;border-radius:18px;display:block;margin:0 auto;">
+      </div>
       <div class="login-title" id="loginTitle">蜕变 · 个人成长系统</div>
       <div class="login-sub" id="loginSub">欢迎回来</div>
       <div class="field">
@@ -51,8 +57,16 @@
       <div class="field" id="loginConfirmField" style="display:none;">
         <input class="input" type="password" id="loginPass2" placeholder="确认密码" autocomplete="new-password">
       </div>
+      <div class="field" id="rememberField" style="display:none;">
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-dim);cursor:pointer;">
+          <input type="checkbox" id="loginRemember" checked style="width:16px;height:16px;"> 记住我（下次自动登录）
+        </label>
+      </div>
       <button class="btn btn-primary btn-block" id="loginBtn">登录</button>
       <div class="login-hint" id="loginHint"></div>
+      <div id="loginForgot" style="display:none;margin-top:10px;text-align:center;">
+        <button class="btn btn-ghost btn-sm" id="logoutBtn" style="font-size:12px;">切换账号 / 退出登录</button>
+      </div>
     </div>
   </div>
 

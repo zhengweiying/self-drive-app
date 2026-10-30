@@ -23,16 +23,25 @@ function defaultData() {
     settings: {
       passcode: null, // 锁屏密码
       name: '',
-      account: null   // { user, passHash } 登录账号
+      account: null,  // { user, passHash } 登录账号
+      remember: true  // 记住登录状态
+    },
+    ai: {
+      apiKey: '',     // DeepSeek API Key（仅存本机）
+      model: 'deepseek-chat',
+      chats: []       // [{id, role:'user'|'assistant', content, date}]
     }
   };
 }
 
 const state = DB.get('data', defaultData());
 if (!state.plan45) state.plan45 = { startDate: null, checks: {} };
-if (!state.settings) state.settings = { passcode: null, name: '', account: null };
+if (!state.settings) state.settings = { passcode: null, name: '', account: null, remember: true };
+if (state.settings.remember === undefined) state.settings.remember = true;
 if (!state.reminders) state.reminders = [];
 if (!state.reviewLog) state.reviewLog = [];
+if (!state.ai) state.ai = { apiKey: '', model: 'deepseek-chat', chats: [] };
+if (!state.ai.chats) state.ai.chats = [];
 
 function save() { DB.set('data', state); }
 
@@ -49,9 +58,13 @@ function showLogin() {
   document.getElementById('loginTitle').textContent = '蜕变 · 个人成长系统';
   document.getElementById('loginSub').textContent = hasAccount ? '欢迎回来，请登录' : '首次使用，请设置账号密码';
   document.getElementById('loginConfirmField').style.display = hasAccount ? 'none' : '';
+  document.getElementById('rememberField').style.display = hasAccount ? '' : 'none';
+  document.getElementById('loginForgot').style.display = hasAccount ? '' : 'none';
+  const rb = document.getElementById('loginRemember');
+  if (rb) rb.checked = state.settings.remember !== false;
   document.getElementById('loginBtn').textContent = hasAccount ? '登录' : '注册并进入';
   document.getElementById('loginHint').textContent = '';
-  document.getElementById('loginUser').value = '';
+  document.getElementById('loginUser').value = state.settings.account ? state.settings.account.user : '';
   document.getElementById('loginPass').value = '';
   document.getElementById('loginPass2').value = '';
 }
@@ -71,6 +84,9 @@ async function handleLogin() {
     // 登录验证
     const hash = await sha256(user + ':' + pass);
     if (user === state.settings.account.user && hash === state.settings.account.passHash) {
+      const rememberEl = document.getElementById('loginRemember');
+      state.settings.remember = rememberEl ? rememberEl.checked : true;
+      save();
       document.getElementById('loginScreen').classList.add('hidden');
       toast('登录成功 ✓');
       render();
@@ -82,6 +98,7 @@ async function handleLogin() {
     if (pass !== pass2) { hint.textContent = '两次密码不一致'; return; }
     const hash = await sha256(user + ':' + pass);
     state.settings.account = { user, passHash: hash };
+    state.settings.remember = true;
     save();
     document.getElementById('loginScreen').classList.add('hidden');
     toast('账号已创建 ✓ 数据仅保存在本机');
@@ -90,12 +107,28 @@ async function handleLogin() {
 }
 
 function initLogin() {
-  showLogin();
+  // 已登录且勾选了「记住我」→ 直接进入，不显示登录页
+  const autoLogin = state.settings.account && state.settings.remember !== false;
+  if (autoLogin) {
+    document.getElementById('loginScreen').classList.add('hidden');
+    render();
+  } else {
+    showLogin();
+  }
   document.getElementById('loginBtn').addEventListener('click', handleLogin);
   ['loginUser', 'loginPass', 'loginPass2'].forEach(id => {
     document.getElementById(id).addEventListener('keydown', e => {
       if (e.key === 'Enter') handleLogin();
     });
+  });
+  const logoutBtn = document.getElementById('logoutBtn');
+  if (logoutBtn) logoutBtn.addEventListener('click', () => {
+    if (confirm('确定退出登录？下次打开需要重新输入账号密码。\n（你的记录数据不会丢失）')) {
+      state.settings.remember = false;
+      save();
+      showLogin();
+      toast('已退出，下次需重新登录');
+    }
   });
 }
 
@@ -295,28 +328,245 @@ function renderDriveSteps() {
 
 // ===== 记录页 =====
 function renderRecord() {
-  const records = [...state.records].reverse();
   content.innerHTML = `
-    <div class="seg">
+    <div class="seg" id="recSeg">
       <button class="active" data-filter="all">全部</button>
       <button data-filter="daily">日常</button>
       <button data-filter="work">工作</button>
       <button data-filter="conf">保密</button>
+      <button data-filter="ai">🤖 AI</button>
     </div>
+    <div id="recordArea"></div>
+  `;
+  document.querySelectorAll('#recSeg button').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('#recSeg button').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      if (b.dataset.filter === 'ai') renderAI();
+      else renderRecordList(b.dataset.filter);
+    });
+  });
+  renderRecordList('all');
+}
+
+function renderRecordList(filter) {
+  const area = document.getElementById('recordArea');
+  area.innerHTML = `
     <button class="btn btn-primary btn-block" id="addRecordBtn" style="margin-bottom:14px;">➕ 新建记录</button>
     <div id="recordList"></div>
   `;
-  
-  document.querySelectorAll('.seg button').forEach(b => {
-    b.addEventListener('click', () => {
-      document.querySelectorAll('.seg button').forEach(x => x.classList.remove('active'));
-      b.classList.add('active');
-      filterRecords(b.dataset.filter);
-    });
-  });
   document.getElementById('addRecordBtn').addEventListener('click', () => openRecordModal());
-  
-  filterRecords('all');
+  filterRecords(filter);
+}
+
+// ===== AI 对话（DeepSeek） =====
+function renderAI() {
+  const area = document.getElementById('recordArea');
+  const hasKey = !!(state.ai && state.ai.apiKey);
+
+  area.innerHTML = `
+    <div class="ai-chat-wrap">
+      <div class="ai-chat-head">
+        <span>🤖 DeepSeek 助手</span>
+        <button class="btn btn-sm btn-ghost" id="aiSettingBtn">⚙️ 设置</button>
+      </div>
+      ${!hasKey ? `
+        <div class="card" style="text-align:center;padding:24px;">
+          <div style="font-size:32px;margin-bottom:10px;">🔑</div>
+          <div style="font-size:15px;font-weight:700;margin-bottom:8px;">尚未配置 API Key</div>
+          <div style="font-size:13px;color:var(--text-dim);line-height:1.7;margin-bottom:16px;">
+            去 platform.deepseek.com 注册并创建 API Key<br>
+            然后点下方按钮填入（Key 只存在你手机本地）
+          </div>
+          <button class="btn btn-primary btn-block" id="aiSetupBtn">填入 API Key</button>
+        </div>
+      ` : `
+        <div class="ai-chat-body" id="aiChatBody"></div>
+        <div class="ai-quick">
+          <button class="ai-chip" data-q="帮我分析一下我最近的记录，给我一些复盘建议">📊 分析我的记录</button>
+          <button class="ai-chip" data-q="根据我的目标，帮我制定本周行动计划">🎯 制定行动计划</button>
+          <button class="ai-chip" data-q="我最近自制力不足，怎么提升自驱力？">⚡ 提升自驱力</button>
+        </div>
+        <div class="ai-input-row">
+          <textarea class="ai-input" id="aiInput" rows="1" placeholder="和 AI 聊聊，或让它分析你的记录..."></textarea>
+          <button class="ai-send" id="aiSend">发送</button>
+        </div>
+      `}
+    </div>
+  `;
+
+  const settingBtn = document.getElementById('aiSettingBtn');
+  if (settingBtn) settingBtn.addEventListener('click', openAISettings);
+  const setupBtn = document.getElementById('aiSetupBtn');
+  if (setupBtn) setupBtn.addEventListener('click', openAISettings);
+
+  if (hasKey) {
+    renderAIChatHistory();
+    const input = document.getElementById('aiInput');
+    const send = document.getElementById('aiSend');
+    send.addEventListener('click', sendAIMessage);
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAIMessage(); }
+    });
+    input.addEventListener('input', () => {
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+    });
+    document.querySelectorAll('.ai-chip').forEach(c => {
+      c.addEventListener('click', () => {
+        input.value = c.dataset.q;
+        sendAIMessage();
+      });
+    });
+  }
+}
+
+function renderAIChatHistory() {
+  const body = document.getElementById('aiChatBody');
+  if (!body) return;
+  const chats = state.ai.chats || [];
+  if (chats.length === 0) {
+    body.innerHTML = `<div class="ai-empty">👋 你好！我是 DeepSeek 助手。<br>可以问我任何问题，或让我分析你的记录。</div>`;
+    return;
+  }
+  body.innerHTML = chats.map(m => `
+    <div class="ai-msg ${m.role}">
+      <div class="ai-bubble">${esc(m.content).replace(/\n/g, '<br>')}</div>
+    </div>
+  `).join('');
+  body.scrollTop = body.scrollHeight;
+}
+
+function buildSystemPrompt() {
+  // 只传非保密记录，保护隐私
+  const safeRecords = state.records.filter(r => !r.confidential).slice(-20);
+  const goals = state.goals.slice(-10);
+  let ctx = '你是「蜕变」个人成长系统的 AI 助手，风格：务实、直接、有行动力，不说空话。';
+  if (safeRecords.length) {
+    ctx += '\n\n用户最近的记录（不含保密内容）：\n' +
+      safeRecords.map(r => `[${r.date}] ${r.type === 'work' ? '工作' : '日常'}：${r.title} - ${r.content}`).join('\n');
+  }
+  if (goals.length) {
+    ctx += '\n\n用户的目标：\n' + goals.map(g => `- ${g.title}（进度${g.progress}%）${g.desc ? '：' + g.desc : ''}`).join('\n');
+  }
+  return ctx;
+}
+
+async function sendAIMessage() {
+  const input = document.getElementById('aiInput');
+  const text = input.value.trim();
+  if (!text) return;
+  if (!state.ai.apiKey) { toast('请先配置 API Key'); return; }
+
+  input.value = '';
+  input.style.height = 'auto';
+
+  state.ai.chats.push({ id: uid(), role: 'user', content: text, date: today() });
+  save();
+  renderAIChatHistory();
+
+  // 显示加载中
+  const body = document.getElementById('aiChatBody');
+  const loading = document.createElement('div');
+  loading.className = 'ai-msg assistant';
+  loading.id = 'aiLoading';
+  loading.innerHTML = '<div class="ai-bubble"><span class="ai-dots">思考中</span></div>';
+  body.appendChild(loading);
+  body.scrollTop = body.scrollHeight;
+
+  try {
+    const messages = [
+      { role: 'system', content: buildSystemPrompt() },
+      ...state.ai.chats.slice(-12).map(m => ({ role: m.role, content: m.content }))
+    ];
+    const res = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + state.ai.apiKey
+      },
+      body: JSON.stringify({
+        model: state.ai.model || 'deepseek-chat',
+        messages,
+        temperature: 0.7,
+        max_tokens: 1500
+      })
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      let msg = '请求失败（' + res.status + '）';
+      if (res.status === 401) msg = 'API Key 无效，请检查是否正确';
+      else if (res.status === 402) msg = '账户余额不足，请去 DeepSeek 充值';
+      else if (res.status === 429) msg = '请求太频繁，稍后再试';
+      throw new Error(msg);
+    }
+
+    const data = await res.json();
+    const reply = data.choices && data.choices[0] && data.choices[0].message
+      ? data.choices[0].message.content
+      : '（AI 未返回内容）';
+
+    state.ai.chats.push({ id: uid(), role: 'assistant', content: reply, date: today() });
+    save();
+    renderAIChatHistory();
+  } catch (err) {
+    const el = document.getElementById('aiLoading');
+    if (el) el.remove();
+    state.ai.chats.push({ id: uid(), role: 'assistant', content: '⚠️ ' + err.message, date: today() });
+    save();
+    renderAIChatHistory();
+  }
+}
+
+function openAISettings() {
+  const ai = state.ai || { apiKey: '', model: 'deepseek-chat' };
+  modal.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-title">⚙️ AI 设置</div>
+      <div class="field">
+        <label>DeepSeek API Key</label>
+        <input class="input" id="aiKeyInput" type="password" value="${esc(ai.apiKey || '')}" placeholder="sk-xxxxxxxx">
+        <div style="font-size:11px;color:var(--text-dim);margin-top:6px;line-height:1.6;">
+          Key 只保存在你手机本地，不会上传到任何服务器。<br>
+          获取地址：<a href="https://platform.deepseek.com" target="_blank" style="color:var(--accent);">platform.deepseek.com</a>
+        </div>
+      </div>
+      <div class="field">
+        <label>模型</label>
+        <select class="select" id="aiModelInput">
+          <option value="deepseek-chat" ${ai.model === 'deepseek-chat' ? 'selected' : ''}>deepseek-chat（快、便宜）</option>
+          <option value="deepseek-reasoner" ${ai.model === 'deepseek-reasoner' ? 'selected' : ''}>deepseek-reasoner（深度推理）</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button class="btn btn-ghost btn-block" id="aiCancel">取消</button>
+        <button class="btn btn-primary btn-block" id="aiSave">保存</button>
+      </div>
+      <button class="btn btn-ghost btn-block" id="aiClear" style="margin-top:10px;font-size:12px;">清空对话历史</button>
+    </div>
+  `;
+  modal.classList.add('show');
+  document.getElementById('aiCancel').addEventListener('click', closeModal);
+  document.getElementById('aiSave').addEventListener('click', () => {
+    const key = document.getElementById('aiKeyInput').value.trim();
+    const model = document.getElementById('aiModelInput').value;
+    state.ai.apiKey = key;
+    state.ai.model = model;
+    save();
+    closeModal();
+    render();
+    toast(key ? 'AI 已配置 ✓' : '已清除 Key');
+  });
+  document.getElementById('aiClear').addEventListener('click', () => {
+    if (confirm('清空所有 AI 对话历史？')) {
+      state.ai.chats = [];
+      save();
+      closeModal();
+      render();
+      toast('已清空');
+    }
+  });
 }
 
 function filterRecords(filter) {
@@ -909,10 +1159,52 @@ function checkAppReminders() {
 function init() {
   initLogin();
   renderLockScreen();
+  const settingsBtn = document.getElementById('settingsBtn');
+  if (settingsBtn) settingsBtn.addEventListener('click', openAppSettings);
   setInterval(checkAppReminders, 30000);
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
+}
+
+// ===== 设置页 =====
+function openAppSettings() {
+  const s = state.settings;
+  modal.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-title">⚙️ 设置</div>
+      <div class="field">
+        <label>登录状态</label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-dim);cursor:pointer;padding:8px 0;">
+          <input type="checkbox" id="setRemember" ${s.remember !== false ? 'checked' : ''} style="width:16px;height:16px;">
+          记住我（下次打开自动登录）
+        </label>
+      </div>
+      <div class="field">
+        <label>🤖 AI 助手</label>
+        <button class="btn btn-ghost btn-block" id="setAI" style="font-size:13px;">${state.ai && state.ai.apiKey ? '已配置 DeepSeek ✓（点击修改）' : '配置 DeepSeek API Key'}</button>
+      </div>
+      <div class="field">
+        <label>数据</label>
+        <button class="btn btn-ghost btn-block" id="setExport" style="font-size:13px;">📤 导出全部数据备份</button>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:4px;">
+        <button class="btn btn-ghost btn-block" id="setClose">关闭</button>
+      </div>
+    </div>
+  `;
+  modal.classList.add('show');
+  document.getElementById('setClose').addEventListener('click', closeModal);
+  document.getElementById('setRemember').addEventListener('change', e => {
+    state.settings.remember = e.target.checked;
+    save();
+    toast(e.target.checked ? '已开启自动登录' : '已关闭自动登录');
+  });
+  document.getElementById('setAI').addEventListener('click', () => { closeModal(); openAISettings(); });
+  document.getElementById('setExport').addEventListener('click', () => {
+    downloadFile(JSON.stringify(state, null, 2), '蜕变数据备份-' + today() + '.json', 'application/json');
+    toast('已导出备份 ✓');
+  });
 }
 
 init();
