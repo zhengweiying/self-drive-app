@@ -1,4 +1,4 @@
-const CACHE = 'tuibian-v2';
+const CACHE = 'tuibian-v4';
 const ASSETS = [
   './',
   './index.html',

@@ -43,7 +43,50 @@ if (!state.reviewLog) state.reviewLog = [];
 if (!state.ai) state.ai = { apiKey: '', model: 'deepseek-chat', chats: [] };
 if (!state.ai.chats) state.ai.chats = [];
 
-function save() { DB.set('data', state); }
+// ===== 数据安全：自动备份 =====
+const BACKUP_KEY = 'sd_backup';
+const BACKUP_MAX = 3;
+
+function autoBackup() {
+  try {
+    const raw = localStorage.getItem('sd_data');
+    if (!raw) return;
+    let backups = [];
+    try { backups = JSON.parse(localStorage.getItem(BACKUP_KEY) || '[]'); } catch (e) { backups = []; }
+    if (!Array.isArray(backups)) backups = [];
+    const last = backups[0];
+    // 同一份内容不重复备份
+    if (last && last.raw === raw) return;
+    backups.unshift({ t: new Date().toISOString(), raw: raw });
+    if (backups.length > BACKUP_MAX) backups = backups.slice(0, BACKUP_MAX);
+    localStorage.setItem(BACKUP_KEY, JSON.stringify(backups));
+  } catch (e) { /* 备份失败不影响主流程 */ }
+}
+
+function save() {
+  autoBackup();
+  DB.set('data', state);
+}
+
+// ===== 数据安全：启动自检 =====
+function dataHealthCheck() {
+  try {
+    const raw = localStorage.getItem('sd_data');
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') throw new Error('结构异常');
+    // 关键字段类型校验，异常时从备份恢复
+    if (!Array.isArray(parsed.records) || !Array.isArray(parsed.goals)) throw new Error('字段缺失');
+  } catch (e) {
+    try {
+      const backups = JSON.parse(localStorage.getItem(BACKUP_KEY) || '[]');
+      if (Array.isArray(backups) && backups.length) {
+        localStorage.setItem('sd_data', backups[0].raw);
+        console.warn('数据异常，已从备份恢复');
+      }
+    } catch (e2) { /* ignore */ }
+  }
+}
 
 // ===== 登录锁 =====
 async function sha256(str) {
@@ -200,12 +243,12 @@ document.querySelectorAll('.tab').forEach(btn => {
   });
 });
 
-// ===== 首页 =====
+// ===== 首页（科技炫彩风） =====
 function renderHome() {
   const p45 = state.plan45;
   const started = !!p45.startDate;
   let dayNum = null, progress = 0;
-  
+
   if (started) {
     dayNum = Math.floor((new Date(today()) - new Date(p45.startDate)) / 86400000) + 1;
     if (dayNum < 1) dayNum = 1;
@@ -217,49 +260,99 @@ function renderHome() {
   let doneCount = 0, totalCount = 0;
   DIMENSIONS.forEach((dim, di) => {
     const arr = todayChecks[di] || [];
-    dim.tasks.forEach((_, ti) => {
-      totalCount++;
-      if (arr[ti]) doneCount++;
-    });
+    dim.tasks.forEach((_, ti) => { totalCount++; if (arr[ti]) doneCount++; });
   });
+  const todayPct = totalCount ? Math.round(doneCount / totalCount * 100) : 0;
 
   const recordCount = state.records.length;
   const goalCount = state.goals.length;
   const enabledReminders = state.reminders.filter(r => r.enabled).length;
 
+  const shortGoals = state.goals.filter(g => g.type === 'short').slice(0, 2);
+  const longGoals = state.goals.filter(g => g.type === 'long').slice(0, 2);
+
   content.innerHTML = `
-    <div class="card" style="background: linear-gradient(135deg, #1e293b, #0f172a); border-color: #38bdf855;">
-      <div style="font-size: 13px; color: var(--text-dim);">${started ? `第 ${dayNum} 天 / 45 天` : '尚未开始蜕变计划'}</div>
-      <div style="font-size: 28px; font-weight: 800; margin: 8px 0;">${started ? `${progress}%` : '准备就绪'}</div>
-      <div class="progress"><div class="progress-fill" style="width:${progress}%"></div></div>
-      ${started ? `<div style="font-size:12px;color:var(--text-dim);margin-top:6px;">今日完成 ${doneCount}/${totalCount} 项</div>` : ''}
-    </div>
-
-    <div class="stat-grid">
-      <div class="stat"><div class="stat-num">${recordCount}</div><div class="stat-label">📝 记录总数</div></div>
-      <div class="stat"><div class="stat-num">${goalCount}</div><div class="stat-label">🎯 目标数量</div></div>
-      <div class="stat"><div class="stat-num">${enabledReminders}</div><div class="stat-label">⏰ 启用提醒</div></div>
-      <div class="stat"><div class="stat-num">${started ? dayNum : '-'}</div><div class="stat-label">🔥 蜕变天数</div></div>
-    </div>
-
-    <div class="card">
-      <div class="card-title">📋 今日待办提醒</div>
-      ${renderTodayReminders()}
-    </div>
-
-    <div class="card">
-      <div class="card-title">💡 复盘建议</div>
-      ${renderReviewSuggestion()}
-    </div>
-
-    <div class="card">
-      <div class="card-title">⚡ 自驱力提升</div>
-      <div style="font-size:13px;color:var(--text-dim);line-height:1.7;">
-        你的自制力需要刻意练习。试试这些步骤：
+    <div class="hero-card">
+      <div class="hero-label"><span class="dot"></span>${started ? '蜕变进行中' : '尚未开始蜕变'}</div>
+      <div class="hero-num">${started ? dayNum : '准备'}<small>${started ? ' / 45 天' : ''}</small></div>
+      <div class="ring-wrap">
+        <div class="ring">
+          <svg width="88" height="88">
+            <defs>
+              <linearGradient id="heroGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#38bdf8"/>
+                <stop offset="100%" stop-color="#a855f7"/>
+              </linearGradient>
+            </defs>
+            <circle class="ring-bg" cx="44" cy="44" r="40"/>
+            <circle class="ring-fill" cx="44" cy="44" r="40" style="stroke-dashoffset:${251 - 251 * todayPct / 100}"/>
+          </svg>
+          <div class="ring-text"><b>${todayPct}%</b><span>今日</span></div>
+        </div>
+        <div class="ring-info">
+          <div class="big">今日完成 ${doneCount} / ${totalCount} 项</div>
+          <div class="sub">物理杀毒 · 信息断舍离 · 社交大清洗<br>执行吃青蛙 · 认知搞钱脑</div>
+        </div>
       </div>
+    </div>
+
+    <div class="glass-stats">
+      <div class="gstat"><div class="gstat-num">${recordCount}</div><div class="gstat-label">📝 记录</div></div>
+      <div class="gstat"><div class="gstat-num">${goalCount}</div><div class="gstat-label">🎯 目标</div></div>
+      <div class="gstat"><div class="gstat-num">${enabledReminders}</div><div class="gstat-label">⏰ 提醒</div></div>
+    </div>
+
+    <div class="sec-head"><span class="sec-title">我的规划</span><span class="sec-more" id="goPlan">全部 ›</span></div>
+    ${renderHomePlans(shortGoals, longGoals)}
+
+    <div class="sec-head"><span class="sec-title">今日待办</span></div>
+    <div class="glass-card">${renderTodayReminders()}</div>
+
+    <div class="sec-head"><span class="sec-title">复盘建议</span></div>
+    <div class="glass-card">${renderReviewSuggestion()}</div>
+
+    <div class="sec-head"><span class="sec-title">自驱力提升</span></div>
+    <div class="glass-card">
+      <div style="font-size:13px;color:var(--text-dim);line-height:1.7;">你的自制力需要刻意练习。试试这些步骤：</div>
       ${renderDriveSteps()}
     </div>
   `;
+
+  const gp = document.getElementById('goPlan');
+  if (gp) gp.addEventListener('click', goPlanTab);
+  document.querySelectorAll('[data-gotoplan]').forEach(el => {
+    el.addEventListener('click', goPlanTab);
+  });
+}
+
+function goPlanTab() {
+  document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+  const t = document.querySelector('.tab[data-tab="plan"]');
+  if (t) t.classList.add('active');
+  currentTab = 'plan';
+  render();
+}
+
+function renderHomePlans(shortGoals, longGoals) {
+  const items = [];
+  shortGoals.forEach(g => items.push({ g, cls: 'short', label: '短期规划' }));
+  longGoals.forEach(g => items.push({ g, cls: 'long', label: '长期规划' }));
+  if (items.length === 0) {
+    return `<div class="glass-card" style="text-align:center;padding:22px;color:var(--text-dim);font-size:13px;" data-gotoplan>
+      还没有规划，点击这里去添加 🎯
+    </div>`;
+  }
+  return items.map(it => `
+    <div class="plan-card ${it.cls}" data-gotoplan>
+      <div class="plan-head">
+        <span class="plan-tag">${it.label}</span>
+        <span class="plan-pct">${it.g.progress}%</span>
+      </div>
+      <div class="plan-title">${esc(it.g.title)}</div>
+      ${it.g.desc ? `<div class="plan-desc">${esc(it.g.desc)}</div>` : ''}
+      <div class="pbar"><div class="pfill" style="width:${it.g.progress}%"></div></div>
+    </div>
+  `).join('');
 }
 
 function renderTodayReminders() {
@@ -599,13 +692,55 @@ function filterRecords(filter) {
   list.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => delRecord(b.dataset.del)));
 }
 
+// ===== 记录自动归类 =====
+const WORK_KEYWORDS = ['盘点','出入库','库存','绩效','工资','报表','会议','开会','汇报','项目','客户','订单','发货','收货','仓','班组','组长','主管','领导','同事','加班','排班','考勤','培训','流程','方案','对接','审批','报销','采购','物流','单据','系统','数据','KPI','考核','值班','交接','预算','成本','供应商','合同','任务','工作'];
+const DAILY_KEYWORDS = ['吃饭','早餐','午餐','晚餐','睡觉','起床','运动','跑步','健身','心情','开心','难过','累','家人','爸妈','孩子','老婆','老公','朋友','聚会','电影','游戏','旅游','休息','周末','生日','逛街','购物','看书','读书'];
+
+function autoClassify(text) {
+  const t = String(text || '');
+  if (!t.trim()) return 'daily';
+  let work = 0, daily = 0;
+  WORK_KEYWORDS.forEach(k => { if (t.includes(k)) work++; });
+  DAILY_KEYWORDS.forEach(k => { if (t.includes(k)) daily++; });
+  if (work > daily) return 'work';
+  if (daily > work) return 'daily';
+  if (/[0-9]+[号个件箱单]|【|】/.test(t) && t.length > 12) return 'work';
+  return 'daily';
+}
+
+async function aiClassify(text) {
+  if (!state.ai || !state.ai.apiKey) return null;
+  try {
+    const res = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.ai.apiKey },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: '你是分类器。判断用户这段话属于「工作」还是「日常」。只回复 work 或 daily 两个词之一，不要任何其他内容。' },
+          { role: 'user', content: text }
+        ],
+        temperature: 0,
+        max_tokens: 5
+      })
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const out = ((data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '').trim().toLowerCase();
+    if (out.indexOf('work') >= 0) return 'work';
+    if (out.indexOf('daily') >= 0) return 'daily';
+    return null;
+  } catch (e) { return null; }
+}
+
 function openRecordModal(id) {
   const r = id ? state.records.find(x => x.id === id) : null;
   modal.innerHTML = `
     <div class="modal-sheet">
       <div class="modal-title">${r ? '编辑记录' : '新建记录'}</div>
-      <div class="field"><label>类型</label>
+      <div class="field"><label>类型 <span style="font-size:11px;color:var(--text-dim);font-weight:400;" id="autoTypeHint">（自动识别）</span></label>
         <select class="select" id="f-type">
+          <option value="auto" ${!r?'selected':''}>🤖 自动识别</option>
           <option value="daily" ${r && r.type==='daily'?'selected':''}>日常分享</option>
           <option value="work" ${r && r.type==='work'?'selected':''}>工作记录</option>
         </select>
@@ -624,7 +759,12 @@ function openRecordModal(id) {
   modal.classList.add('show');
   document.getElementById('f-cancel').addEventListener('click', closeModal);
   document.getElementById('f-save').addEventListener('click', () => {
-    const type = document.getElementById('f-type').value;
+    const typeEl = document.getElementById('f-type');
+    let type = typeEl ? typeEl.value : 'auto';
+    if (type === 'auto') {
+      const raw = (document.getElementById('f-title').value || '') + ' ' + (document.getElementById('f-content').value || '');
+      type = autoClassify(raw);
+    }
     const title = document.getElementById('f-title').value.trim();
     const content = document.getElementById('f-content').value.trim();
     const confidential = document.getElementById('f-conf').checked;
@@ -1156,7 +1296,58 @@ function checkAppReminders() {
 }
 
 // ===== 初始化 =====
+// ===== 星空粒子背景 =====
+function initStarfield() {
+  if (document.getElementById('starfield')) return;
+  const cv = document.createElement('canvas');
+  cv.id = 'starfield';
+  document.body.insertBefore(cv, document.body.firstChild);
+  const aurora = document.createElement('div');
+  aurora.className = 'aurora-bg';
+  document.body.insertBefore(aurora, document.body.firstChild);
+  const ctx = cv.getContext('2d');
+  let stars = [], w, h;
+  function resize() {
+    w = cv.width = innerWidth * devicePixelRatio;
+    h = cv.height = innerHeight * devicePixelRatio;
+    cv.style.width = innerWidth + 'px';
+    cv.style.height = innerHeight + 'px';
+    stars = Array.from({ length: 90 }, () => ({
+      x: Math.random() * w, y: Math.random() * h,
+      r: Math.random() * 1.5 * devicePixelRatio,
+      a: Math.random(), s: Math.random() * 0.02 + 0.004,
+      vx: (Math.random() - 0.5) * 0.12 * devicePixelRatio,
+      vy: (Math.random() - 0.5) * 0.12 * devicePixelRatio
+    }));
+  }
+  resize();
+  addEventListener('resize', resize);
+  let stopped = false;
+  document.addEventListener('visibilitychange', () => { stopped = document.hidden; });
+  function draw() {
+    if (!stopped) {
+      ctx.clearRect(0, 0, w, h);
+      stars.forEach(st => {
+        st.a += st.s; if (st.a > 1 || st.a < 0.1) st.s *= -1;
+        st.x += st.vx; st.y += st.vy;
+        if (st.x < 0) st.x = w; if (st.x > w) st.x = 0;
+        if (st.y < 0) st.y = h; if (st.y > h) st.y = 0;
+        ctx.beginPath();
+        ctx.arc(st.x, st.y, st.r, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(180,220,255,' + (st.a * 0.85) + ')';
+        ctx.shadowBlur = 6 * devicePixelRatio;
+        ctx.shadowColor = 'rgba(125,211,252,.8)';
+        ctx.fill();
+      });
+    }
+    requestAnimationFrame(draw);
+  }
+  draw();
+}
+
 function init() {
+  dataHealthCheck();
+  initStarfield();
   initLogin();
   renderLockScreen();
   const settingsBtn = document.getElementById('settingsBtn');
@@ -1185,8 +1376,13 @@ function openAppSettings() {
         <button class="btn btn-ghost btn-block" id="setAI" style="font-size:13px;">${state.ai && state.ai.apiKey ? '已配置 DeepSeek ✓（点击修改）' : '配置 DeepSeek API Key'}</button>
       </div>
       <div class="field">
-        <label>数据</label>
-        <button class="btn btn-ghost btn-block" id="setExport" style="font-size:13px;">📤 导出全部数据备份</button>
+        <label>数据安全</label>
+        <button class="btn btn-ghost btn-block" id="setExport" style="font-size:13px;margin-bottom:8px;">📤 导出备份到文件</button>
+        <button class="btn btn-ghost btn-block" id="setImport" style="font-size:13px;margin-bottom:8px;">📥 从文件恢复数据</button>
+        <button class="btn btn-ghost btn-block" id="setRestore" style="font-size:13px;">♻️ 恢复最近自动备份</button>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:8px;line-height:1.6;">
+          数据只存在这台设备。更新版本不会清空数据；换手机或清理浏览器前，请先导出备份。
+        </div>
       </div>
       <div style="display:flex;gap:10px;margin-top:4px;">
         <button class="btn btn-ghost btn-block" id="setClose">关闭</button>
@@ -1204,6 +1400,45 @@ function openAppSettings() {
   document.getElementById('setExport').addEventListener('click', () => {
     downloadFile(JSON.stringify(state, null, 2), '蜕变数据备份-' + today() + '.json', 'application/json');
     toast('已导出备份 ✓');
+  });
+
+  document.getElementById('setImport').addEventListener('click', () => {
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = '.json,application/json';
+    inp.addEventListener('change', () => {
+      const f = inp.files && inp.files[0];
+      if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => {
+        try {
+          const obj = JSON.parse(rd.result);
+          if (!obj || typeof obj !== 'object' || !Array.isArray(obj.records)) throw new Error('不是有效的备份文件');
+          if (!confirm('导入会覆盖当前全部数据，确定继续吗？\n\n备份文件包含：' + (obj.records ? obj.records.length : 0) + ' 条记录、' + ((obj.goals && obj.goals.length) || 0) + ' 个目标')) return;
+          localStorage.setItem('sd_data', JSON.stringify(obj));
+          toast('导入成功，正在重启…');
+          setTimeout(() => location.reload(), 800);
+        } catch (e) {
+          toast('导入失败：' + e.message);
+        }
+      };
+      rd.readAsText(f);
+    });
+    inp.click();
+  });
+
+  document.getElementById('setRestore').addEventListener('click', () => {
+    let backups = [];
+    try { backups = JSON.parse(localStorage.getItem(BACKUP_KEY) || '[]'); } catch (e) { backups = []; }
+    if (!Array.isArray(backups) || !backups.length) { toast('暂无自动备份'); return; }
+    const b = backups[0];
+    const when = new Date(b.t).toLocaleString('zh-CN');
+    let cnt = 0;
+    try { cnt = (JSON.parse(b.raw).records || []).length; } catch (e) { cnt = 0; }
+    if (!confirm('恢复 ' + when + ' 的自动备份？\n（含 ' + cnt + ' 条记录，会覆盖当前数据）')) return;
+    localStorage.setItem('sd_data', b.raw);
+    toast('已恢复，正在重启…');
+    setTimeout(() => location.reload(), 800);
   });
 }
 
